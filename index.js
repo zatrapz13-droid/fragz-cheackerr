@@ -1,112 +1,48 @@
 const express = require("express");
-const crypto = require("crypto");
 const axios = require("axios");
 
 const app = express();
+
+// IMPORTANT: allow JSON body
 app.use(express.json());
 
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
-const SELLAUTH_API = process.env.SELLAUTH_API;
+// Health check route (so your link doesn’t look “broken”)
+app.get("/", (req, res) => {
+  res.send("Fragz webhook is online ✅");
+});
 
+// Webhook route (SellAuth sends orders here)
 app.post("/webhook", async (req, res) => {
   try {
-    const payload = JSON.stringify(req.body);
+    const data = req.body;
 
-    const signature = crypto
-      .createHmac("sha256", WEBHOOK_SECRET)
-      .update(payload)
-      .digest("hex");
+    console.log("🔥 SELL AUTH EVENT RECEIVED:");
+    console.log(JSON.stringify(data, null, 2));
 
-    if (signature !== req.headers["x-signature"]) {
-      return res.status(403).send("Bad signature");
-    }
+    // Extract invoice safely
+    const invoiceId = data?.data?.invoice_id || "Unknown";
 
-    if (req.body.event !== "NOTIFICATION.SHOP_INVOICE_CREATED") {
-      return res.sendStatus(200);
-    }
+    const event = data?.event || "Unknown Event";
 
-    const invoiceId = req.body.data.invoice_id;
+    // Send to Discord
+    await axios.post(process.env.DISCORD_WEBHOOK, {
+      content: `🧾 **New Order Received**
 
-    const response = await axios.get(
-      `https://api.sellauth.com/v1/invoices/${invoiceId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${SELLAUTH_API}`
-        }
-      }
-    );
-
-    const order = response.data;
-
-    const embed = {
-      embeds: [{
-        title: "🌸 FRAGZ ORDER RECEIVED",
-        description: "━━━━━━━━━━━━━━━━━━",
-        color: 16738740, // pink
-
-        fields: [
-          {
-            name: "🧾 Invoice",
-            value: `#${order.id}`,
-            inline: true
-          },
-          {
-            name: "👤 Customer",
-            value: order.discord_id
-              ? `<@${order.discord_id}>`
-              : "No Discord Linked",
-            inline: true
-          },
-          {
-            name: "📧 Email",
-            value: order.customer_email || "Unknown"
-          },
-          {
-            name: "💳 Payment Method",
-            value: order.payment_method || "Unknown",
-            inline: true
-          },
-          {
-            name: "🛒 Product",
-            value: order.products?.[0]?.name || "Unknown"
-          },
-          {
-            name: "💰 Price",
-            value: `$${order.total}`,
-            inline: true
-          },
-          {
-            name: "📦 Stock Remaining",
-            value: String(
-              order.products?.[0]?.variant_stock || "Unknown"
-            ),
-            inline: true
-          },
-          {
-            name: "Status",
-            value: "Payment Received ✅"
-          }
-        ],
-
-        footer: {
-          text: "Fragz Store"
-        },
-
-        timestamp: new Date()
-      }]
-    };
-
-    await axios.post(DISCORD_WEBHOOK, embed);
+📦 Event: ${event}
+🧾 Invoice ID: ${invoiceId}
+`
+    });
 
     res.sendStatus(200);
-
   } catch (err) {
-    console.log(err);
-    res.sendStatus(500);
+    console.error("Webhook Error:", err.message);
+    res.sendStatus(200); // always respond 200 so SellAuth doesn't retry spam
   }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("Fragz webhook running");
+// Start server (Render compatible)
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Fragz webhook running on port ${PORT}`);
 });
